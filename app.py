@@ -281,8 +281,8 @@ def validate_summary_length(summary):
                 word_count = len(summary.split())
     return summary
 
-# ✅ ADD HEALTH CHECK ENDPOINT
-@app.route("/")
+# ✅ ADD HEALTH CHECK ENDPOINT - FIXED TO ACCEPT GET REQUESTS
+@app.route("/", methods=['GET'])
 def hello():
     return jsonify({
         "message": "🚀 Resume Generator API is running!",
@@ -298,6 +298,32 @@ def health_check():
         "message": "API is working correctly",
         "timestamp": datetime.now().isoformat()
     })
+
+# ✅ ADD GET ENDPOINT FOR RESUME GENERATION TO HANDLE THE 405 ERROR
+@app.route("/api/generate-resume-from-prompt", methods=['GET'])
+def generate_resume_get():
+    """Handle GET requests to the resume generation endpoint"""
+    return jsonify({
+        "error": "Method Not Allowed",
+        "message": "Please use POST method to generate a resume. Send your data as JSON in the request body.",
+        "required_fields": [
+            "prompt", "fullName", "email", "phone", "location", 
+            "stream", "field", "userType", "experienceLevel", "targetRole", "skills"
+        ],
+        "example_request": {
+            "prompt": "I am a BCA student at Medicaps University...",
+            "fullName": "John Doe",
+            "email": "john@example.com",
+            "phone": "+1234567890",
+            "location": "City, Country",
+            "stream": "Computer Science",
+            "field": "Software Development",
+            "userType": "Student",
+            "experienceLevel": "Fresher",
+            "targetRole": "Software Developer",
+            "skills": "Java, Python, SQL"
+        }
+    }), 405
 
 # ✅ ALL YOUR EXISTING ROUTES REMAIN EXACTLY THE SAME
 @app.route("/api/signup", methods=['POST'])
@@ -844,4 +870,6 @@ if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
 else:
     # For Vercel serverless
+    with app.app_context():
+        db.create_all()
     application = app
