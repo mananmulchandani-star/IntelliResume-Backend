@@ -299,31 +299,59 @@ def health_check():
         "timestamp": datetime.now().isoformat()
     })
 
-# ✅ ADD GET ENDPOINT FOR RESUME GENERATION TO HANDLE THE 405 ERROR
+# ✅ ADD GET ENDPOINT FOR QUICK FIX (WORKING GET ENDPOINT)
 @app.route("/api/generate-resume-from-prompt", methods=['GET'])
 def generate_resume_get():
-    """Handle GET requests to the resume generation endpoint"""
-    return jsonify({
-        "error": "Method Not Allowed",
-        "message": "Please use POST method to generate a resume. Send your data as JSON in the request body.",
-        "required_fields": [
-            "prompt", "fullName", "email", "phone", "location", 
-            "stream", "field", "userType", "experienceLevel", "targetRole", "skills"
-        ],
-        "example_request": {
-            "prompt": "I am a BCA student at Medicaps University...",
-            "fullName": "John Doe",
-            "email": "john@example.com",
-            "phone": "+1234567890",
-            "location": "City, Country",
-            "stream": "Computer Science",
-            "field": "Software Development",
-            "userType": "Student",
-            "experienceLevel": "Fresher",
-            "targetRole": "Software Developer",
-            "skills": "Java, Python, SQL"
-        }
-    }), 405
+    """Handle GET requests to the resume generation endpoint - QUICK FIX"""
+    try:
+        # Get parameters from query string
+        prompt = request.args.get('prompt', '')
+        full_name = request.args.get('fullName', '')
+        email = request.args.get('email', '')
+        phone = request.args.get('phone', '')
+        location = request.args.get('location', '')
+        stream = request.args.get('stream', '')
+        specific_field = request.args.get('field', '')
+        user_type = request.args.get('userType', '')
+        experience_level = request.args.get('experienceLevel', '')
+        target_role = request.args.get('targetRole', '')
+        skills_input = request.args.get('skills', '')
+        
+        if not prompt:
+            return jsonify({
+                "error": "Missing required parameters",
+                "message": "Please provide at least a 'prompt' parameter in the URL",
+                "example_url": "/api/generate-resume-from-prompt?prompt=I am a BCA student...&fullName=John Doe&email=john@example.com",
+                "required_parameters": [
+                    "prompt", "fullName", "email", "phone", "location", 
+                    "stream", "field", "userType", "experienceLevel", "targetRole", "skills"
+                ]
+            }), 400
+        
+        print("📨 RECEIVED GET REQUEST WITH PARAMETERS:")
+        print(f"  Prompt: {prompt}")
+        print(f"  Name: {full_name}")
+        print(f"  Email: {email}")
+        
+        # Use your existing function to generate resume
+        content_type = detect_content_type(prompt)
+        resume_data = create_enhanced_resume_from_data(
+            full_name, email, phone, location, prompt, 
+            content_type, stream, specific_field, experience_level
+        )
+        
+        return jsonify({
+            "resumeData": resume_data,
+            "message": "Resume generated via GET request",
+            "note": "For better performance, use POST method with JSON body"
+        })
+        
+    except Exception as e:
+        print("❌ ERROR in GET endpoint:", str(e))
+        return jsonify({
+            "error": "Failed to generate resume",
+            "message": str(e)
+        }), 500
 
 # ✅ ALL YOUR EXISTING ROUTES REMAIN EXACTLY THE SAME
 @app.route("/api/signup", methods=['POST'])
