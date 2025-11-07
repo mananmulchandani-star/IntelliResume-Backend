@@ -13,10 +13,12 @@ import random
 # --- App Initialization & Configuration ---
 app = Flask(__name__)
 
-# ✅ FIXED CORS FOR PRODUCTION
+# ✅ FIXED CORS FOR ALL FRONTEND DOMAINS
 CORS(app, 
      origins=[
-         "https://intelli-resume-rontend.vercel.app",  # Your frontend
+         "https://intelli-resume-rontend.vercel.app",
+         "https://intelli-resume-rontend-git-main-manan6.vercel.app",
+         "https://intelli-resume-rontend-7vpjcjvdj-manan6.vercel.app",
          "http://localhost:5173", 
          "http://127.0.0.1:5173"
      ], 
@@ -32,10 +34,17 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 
-# ✅ ADD MANUAL CORS HANDLING
+# ✅ ADD MANUAL CORS HANDLING FOR ALL DOMAINS
 @app.after_request
 def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', 'https://intelli-resume-rontend.vercel.app')
+    allowed_origins = [
+        "https://intelli-resume-rontend.vercel.app",
+        "https://intelli-resume-rontend-git-main-manan6.vercel.app",
+        "https://intelli-resume-rontend-7vpjcjvdj-manan6.vercel.app"
+    ]
+    origin = request.headers.get('Origin')
+    if origin in allowed_origins:
+        response.headers.add('Access-Control-Allow-Origin', origin)
     response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     response.headers.add('Access-Control-Allow-Credentials', 'true')
@@ -46,7 +55,14 @@ def after_request(response):
 def handle_preflight():
     if request.method == "OPTIONS":
         response = jsonify({"status": "preflight"})
-        response.headers.add('Access-Control-Allow-Origin', 'https://intelli-resume-rontend.vercel.app')
+        allowed_origins = [
+            "https://intelli-resume-rontend.vercel.app",
+            "https://intelli-resume-rontend-git-main-manan6.vercel.app",
+            "https://intelli-resume-rontend-7vpjcjvdj-manan6.vercel.app"
+        ]
+        origin = request.headers.get('Origin')
+        if origin in allowed_origins:
+            response.headers.add('Access-Control-Allow-Origin', origin)
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
         response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
         response.headers.add('Access-Control-Allow-Credentials', 'true')
