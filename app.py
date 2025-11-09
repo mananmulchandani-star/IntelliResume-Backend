@@ -5,15 +5,15 @@ from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
 from flask_cors import CORS
-from groq import Groq
 import json
 import re
 import random
+import requests  # Using requests instead of Groq package
 
 # --- App Initialization & Configuration ---
 app = Flask(__name__)
 
-# ✅ FIXED CORS - REMOVED DUPLICATE HEADERS
+# ✅ CORS Configuration
 CORS(app, 
      origins=[
          "https://intelli-resume-rontend.vercel.app",
@@ -33,10 +33,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 bcrypt = Bcrypt(app)
 
-# ✅ REMOVED MANUAL CORS HANDLING TO AVOID DUPLICATE HEADERS
-# Let Flask-CORS handle everything
-
-# Your existing classes remain the same (for user auth only)
+# Your existing classes remain the same
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -54,7 +51,38 @@ class SkillVerification(db.Model):
     verified_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-# ✅ ALL YOUR EXISTING FUNCTIONS REMAIN EXACTLY THE SAME
+# ✅ FIXED GROQ CLIENT USING REQUESTS (More reliable)
+def call_groq_api(messages, model="llama-3.1-8b-instant", temperature=0.1, max_tokens=2500):
+    """Call GROQ API using requests instead of Groq package"""
+    api_key = os.environ.get("GROQ_API_KEY")
+    
+    if not api_key:
+        raise Exception("GROQ_API_KEY environment variable is not set")
+    
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "messages": messages,
+        "model": model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "top_p": 1,
+        "stream": False
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"GROQ API Request failed: {e}")
+        raise Exception(f"Failed to connect to AI service: {str(e)}")
+
 def extract_json_from_text(text):
     """Extract JSON from AI response text"""
     try:
@@ -144,14 +172,15 @@ def validate_summary_length(summary):
                 word_count = len(summary.split())
     return summary
 
-# ✅ ADD HEALTH CHECK ENDPOINT
+# ✅ HEALTH CHECK ENDPOINT
 @app.route("/", methods=['GET'])
 def hello():
     return jsonify({
         "message": "🚀 Resume Generator API is running!",
         "status": "success",
         "frontend": "https://intelli-resume-rontend.vercel.app",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "groq_configured": bool(os.environ.get("GROQ_API_KEY"))
     })
 
 @app.route("/api/health", methods=['GET'])
@@ -159,227 +188,11 @@ def health_check():
     return jsonify({
         "status": "healthy",
         "message": "API is working correctly",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "groq_key_configured": bool(os.environ.get("GROQ_API_KEY"))
     })
 
-# ✅ ADD GET ENDPOINT FOR QUICK FIX
-@app.route("/api/generate-resume-from-prompt", methods=['GET'])
-def generate_resume_get():
-    """Handle GET requests to the resume generation endpoint - QUICK FIX"""
-    try:
-        # Get parameters from query string
-        prompt = request.args.get('prompt', '')
-        full_name = request.args.get('fullName', '')
-        email = request.args.get('email', '')
-        phone = request.args.get('phone', '')
-        location = request.args.get('location', '')
-        stream = request.args.get('stream', '')
-        specific_field = request.args.get('field', '')
-        user_type = request.args.get('userType', '')
-        experience_level = request.args.get('experienceLevel', '')
-        target_role = request.args.get('targetRole', '')
-        skills_input = request.args.get('skills', '')
-        
-        if not prompt:
-            return jsonify({
-                "error": "Missing required parameters",
-                "message": "Please provide at least a 'prompt' parameter in the URL",
-                "example_url": "/api/generate-resume-from-prompt?prompt=I am a BCA student...&fullName=John Doe&email=john@example.com",
-                "required_parameters": [
-                    "prompt", "fullName", "email", "phone", "location", 
-                    "stream", "field", "userType", "experienceLevel", "targetRole", "skills"
-                ]
-            }), 400
-        
-        print("📨 RECEIVED GET REQUEST WITH PARAMETERS:")
-        print(f"  Prompt: {prompt}")
-        print(f"  Name: {full_name}")
-        print(f"  Email: {email}")
-        
-        # Use AI to generate resume
-        api_key = os.environ.get("GROQ_API_KEY")
-        if not api_key:
-            return jsonify({"error": "GROQ_API_KEY environment variable is not set"}), 500
-
-        enhanced_prompt = f"""
-Create a comprehensive professional resume in JSON format using this information:
-
-USER PROVIDED BASIC INFORMATION (USE THESE EXACT VALUES):
-- Full Name: {full_name}
-- Email: {email}
-- Phone: {phone}
-- Location: {location}
-- Field/Stream: {stream}
-- Specific Field: {specific_field}
-- User Type: {user_type}
-- Experience Level: {experience_level}
-- Target Role: {target_role}
-- Skills: {skills_input}
-
-USER BACKGROUND DESCRIPTION: "{prompt}"
-
-CRITICAL INSTRUCTIONS:
-1. USE the exact basic information provided above - DO NOT change names or contact details
-2. Generate an appropriate professional title/jobTitle based on the user's background and field
-3. Create a 50-80 word professional summary
-4. Extract education details from the user's background description
-5. Generate RELEVANT skills based on their field and target role - DO NOT use generic skills
-6. Add default languages: English and Hindi
-7. Create realistic projects based on their field of study
-8. Include extra-curricular activities if mentioned
-9. Output ONLY valid JSON
-
-Return ONLY this JSON structure:
-{{
-  "fullName": "{full_name}",
-  "email": "{email}",
-  "phone": "{phone}",
-  "location": "{location}",
-  "jobTitle": "Professional title based on background and field",
-  "summary": "50-80 word professional summary",
-  "education": [
-    {{
-      "id": 1,
-      "degree": "Extracted degree",
-      "school": "Extracted school", 
-      "year": "Extracted year",
-      "score": "Extracted score or ''"
-    }}
-  ],
-  "skills": ["AI-generated relevant technical and soft skills"],
-  "projects": [
-    {{
-      "title": "Relevant project title",
-      "description": "Project description",
-      "technologies": ["tech used"]
-    }}
-  ],
-  "workExperience": [
-    {{
-      "id": 1,
-      "company": "Company name if mentioned",
-      "position": "Position title",
-      "startDate": "Start date",
-      "endDate": "End date",
-      "description": "Responsibilities and achievements"
-    }}
-  ],
-  "internships": [
-    {{
-      "id": 1,
-      "company": "Company name",
-      "role": "Intern role",
-      "duration": "Duration",
-      "description": "Learning and contributions"
-    }}
-  ],
-  "extraCurricular": [
-    {{
-      "activity": "Activity name",
-      "role": "Role played",
-      "duration": "Duration",
-      "achievements": "Key achievements"
-    }}
-  ],
-  "languages": [
-    {{"language": "English", "proficiency": "Native/Fluent"}},
-    {{"language": "Hindi", "proficiency": "Native/Fluent"}}
-  ],
-  "certifications": [],
-  "achievements": []
-}}
-
-IMPORTANT: 
-- Generate ALL skills based on the user's field and target role
-- Do NOT use generic skills like 'Communication', 'Teamwork' unless specifically mentioned
-- Summary must be 50+ words
-- Use the exact basic information provided
-- Include English and Hindi as default languages
-- Output ONLY JSON, no other text
-"""
-
-        client = Groq(api_key=api_key)
-        chat_completion = client.chat.completions.create(
-            messages=[{"role": "user", "content": enhanced_prompt}],
-            model="llama-3.1-8b-instant",
-            temperature=0.1,
-            max_tokens=2500
-        )
-        
-        ai_content = chat_completion.choices[0].message.content.strip()
-        print("AI Raw Output:", ai_content)
-        
-        resume_data = extract_json_from_text(ai_content)
-        
-        if not resume_data:
-            print("❌ AI returned invalid JSON, using enhanced fallback...")
-            resume_data = create_fallback_resume(full_name, email, phone, location, prompt, stream, specific_field, experience_level, target_role)
-        else:
-            print("✅ AI returned valid JSON")
-            # Ensure basic info is preserved
-            resume_data['fullName'] = full_name or resume_data.get('fullName', 'Your Name')
-            resume_data['email'] = email or resume_data.get('email', 'your.email@example.com')
-            resume_data['phone'] = phone or resume_data.get('phone', '+1 234 567 8900')
-            resume_data['location'] = location or resume_data.get('location', 'Your Location')
-            
-            # Ensure jobTitle exists and is appropriate
-            if 'jobTitle' not in resume_data:
-                resume_data['jobTitle'] = generate_professional_title(prompt, specific_field, experience_level)
-            
-            # Ensure languages section exists with defaults
-            if 'languages' not in resume_data:
-                resume_data['languages'] = [
-                    {"language": "English", "proficiency": "Fluent"},
-                    {"language": "Hindi", "proficiency": "Native"}
-                ]
-            
-            # Validate and enhance summary
-            if 'summary' in resume_data:
-                resume_data['summary'] = validate_summary_length(resume_data['summary'])
-        
-        return jsonify({
-            "resumeData": resume_data,
-            "message": "Resume generated via GET request",
-            "note": "For better performance, use POST method with JSON body"
-        })
-        
-    except Exception as e:
-        print("❌ ERROR in GET endpoint:", str(e))
-        return jsonify({
-            "error": "Failed to generate resume",
-            "message": str(e)
-        }), 500
-
-# ✅ ALL YOUR EXISTING ROUTES REMAIN EXACTLY THE SAME
-@app.route("/api/signup", methods=['POST'])
-def signup():
-    data = request.get_json()
-    username = data.get('username')
-    email = data.get('email')
-    password = data.get('password')
-    if not username or not email or not password:
-        return jsonify({"message": "Missing username, email, or password"}), 400
-    hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
-    new_user = User(username=username, email=email, password_hash=hashed_password)
-    try:
-        db.session.add(new_user)
-        db.session.commit()
-        return jsonify({"message": "User created successfully!"}), 201
-    except:
-        return jsonify({"message": "Username or email already exists"}), 400
-
-@app.route("/api/login", methods=['POST'])
-def login():
-    data = request.get_json()
-    email = data.get('email')
-    password = data.get('password')
-    user = User.query.filter_by(email=email).first()
-    if user and bcrypt.check_password_hash(user.password_hash, password):
-        token = jwt.encode({'user_id': user.id, 'exp': datetime.utcnow() + timedelta(hours=24)}, app.config['SECRET_KEY'], algorithm="HS256")
-        return jsonify({"token": token})
-    return jsonify({"message": "Invalid credentials"}), 401
-
-# ✅ MAIN RESUME GENERATION ENDPOINT - PURE AI BASED
+# ✅ MAIN RESUME GENERATION ENDPOINT - FIXED GROQ INTEGRATION
 @app.route("/api/generate-resume-from-prompt", methods=['POST', 'OPTIONS'])
 def generate_resume():
     try:
@@ -404,12 +217,7 @@ def generate_resume():
         target_role = data.get('targetRole', '')
         skills_input = data.get('skills', '')
         
-        print(f"🔍 Using basic info - Name: {full_name}, Email: {email}, Phone: {phone}, Location: {location}")
-        
-        api_key = os.environ.get("GROQ_API_KEY")
-
-        if not api_key:
-            return jsonify({"error": "GROQ_API_KEY environment variable is not set"}), 500
+        print(f"🔍 Using basic info - Name: {full_name}, Email: {email}")
 
         # ✅ ENHANCED PROMPT FOR PURE AI-GENERATED CONTENT
         enhanced_prompt = f"""
@@ -439,12 +247,6 @@ CRITICAL INSTRUCTIONS:
 7. Include work experience only if relevant to their background
 8. Add default languages: English and Hindi
 9. Output ONLY valid JSON
-
-IMPORTANT FOR SKILLS GENERATION:
-- Generate RELEVANT technical skills based on their field (e.g., for computer science: Python, Java, SQL, etc.)
-- Generate RELEVANT soft skills based on their experience level
-- DO NOT use generic skills like 'Communication', 'Teamwork' unless specifically mentioned
-- Skills should be specific to their industry and role
 
 Return ONLY this JSON structure:
 {{
@@ -509,17 +311,15 @@ Return ONLY this JSON structure:
 Output ONLY JSON, no other text
 """
 
-        print("Sending enhanced prompt to AI...")
-        client = Groq(api_key=api_key)
-        chat_completion = client.chat.completions.create(
-            messages=[{"role": "user", "content": enhanced_prompt}],
-            model="llama-3.1-8b-instant",
-            temperature=0.1,
-            max_tokens=2500
-        )
+        print("🤖 Sending request to GROQ API...")
         
-        ai_content = chat_completion.choices[0].message.content.strip()
-        print("AI Raw Output:", ai_content)
+        # ✅ FIXED: Using requests instead of Groq package
+        groq_response = call_groq_api([
+            {"role": "user", "content": enhanced_prompt}
+        ])
+        
+        ai_content = groq_response['choices'][0]['message']['content'].strip()
+        print("✅ AI Raw Output Received")
         
         resume_data = extract_json_from_text(ai_content)
         
@@ -549,12 +349,17 @@ Output ONLY JSON, no other text
             if 'summary' in resume_data:
                 resume_data['summary'] = validate_summary_length(resume_data['summary'])
         
-        print("📤 SENDING ENHANCED DATA TO FRONTEND:", resume_data)
-        return jsonify({"resumeData": resume_data})
+        print("📤 Sending enhanced data to frontend")
+        return jsonify({
+            "success": True,
+            "resumeData": resume_data,
+            "message": "Resume generated successfully"
+        })
         
     except Exception as e:
-        print("❌ ERROR:", str(e))
+        print(f"❌ ERROR in resume generation: {str(e)}")
         # Always return a valid resume using fallback
+        data = request.get_json() or {}
         resume_data = create_fallback_resume(
             data.get('fullName', ''), 
             data.get('email', ''), 
@@ -566,7 +371,12 @@ Output ONLY JSON, no other text
             data.get('experienceLevel', ''),
             data.get('targetRole', '')
         )
-        return jsonify({"resumeData": resume_data})
+        return jsonify({
+            "success": False,
+            "resumeData": resume_data,
+            "error": str(e),
+            "message": "Used fallback resume due to AI service issue"
+        })
 
 def create_fallback_resume(full_name, email, phone, location, user_prompt, stream, specific_field, experience_level, target_role):
     """Create fallback resume with AI-inspired content"""
@@ -580,7 +390,7 @@ def create_fallback_resume(full_name, email, phone, location, user_prompt, strea
         "phone": phone or "+1 234 567 8900",
         "location": location or "Your Location",
         "jobTitle": target_role or generate_professional_title(user_prompt, specific_field, experience_level),
-        "summary": f"Motivated {experience_level.lower() if experience_level else 'professional'} with background in {specific_field or stream or 'relevant field'}. Seeking {target_role or 'opportunities'} to apply skills and contribute to innovative projects. {user_prompt[:100]}..." + " " * 50,  # Ensure minimum length
+        "summary": f"Motivated {experience_level.lower() if experience_level else 'professional'} with background in {specific_field or stream or 'relevant field'}. Seeking {target_role or 'opportunities'} to apply skills and contribute to innovative projects. {user_prompt[:100]}..." + " " * 50,
         
         "education": [{
             "id": 1,
@@ -642,7 +452,36 @@ def generate_field_specific_skills(stream, specific_field, target_role):
     if len(skills) < 5:
         skills.extend(['Problem Solving', 'Project Management', 'Communication'])
     
-    return skills[:10]  # Return top 10 skills
+    return skills[:10]
+
+# ✅ KEEP YOUR EXISTING AUTH ENDPOINTS (they work fine)
+@app.route("/api/signup", methods=['POST'])
+def signup():
+    data = request.get_json()
+    username = data.get('username')
+    email = data.get('email')
+    password = data.get('password')
+    if not username or not email or not password:
+        return jsonify({"message": "Missing username, email, or password"}), 400
+    hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
+    new_user = User(username=username, email=email, password_hash=hashed_password)
+    try:
+        db.session.add(new_user)
+        db.session.commit()
+        return jsonify({"message": "User created successfully!"}), 201
+    except:
+        return jsonify({"message": "Username or email already exists"}), 400
+
+@app.route("/api/login", methods=['POST'])
+def login():
+    data = request.get_json()
+    email = data.get('email')
+    password = data.get('password')
+    user = User.query.filter_by(email=email).first()
+    if user and bcrypt.check_password_hash(user.password_hash, password):
+        token = jwt.encode({'user_id': user.id, 'exp': datetime.utcnow() + timedelta(hours=24)}, app.config['SECRET_KEY'], algorithm="HS256")
+        return jsonify({"token": token})
+    return jsonify({"message": "Invalid credentials"}), 401
 
 # ✅ VERCEL COMPATIBILITY
 if __name__ == '__main__':
